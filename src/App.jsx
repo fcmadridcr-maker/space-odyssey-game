@@ -5,7 +5,49 @@ import { Rocket, Star, Trophy, RotateCcw, Maximize2 } from 'lucide-react';
 const W = 390;
 const H = 844;
 const MAX_LEVEL = 501;
+// Recompensas de demostración: todavía no son criptomonedas.
+const REWARD_PER_STAR = 1;
 
+function getMissions(stars, level, elapsed) {
+  return [
+    {
+      id: 'stars10',
+      title: 'Cazador de estrellas',
+      detail: 'Recoge 10 estrellas',
+      progress: Math.min(stars, 10),
+      goal: 10,
+      reward: 10,
+      done: stars >= 10,
+    },
+    {
+      id: 'stars25',
+      title: 'Lluvia cósmica',
+      detail: 'Recoge 25 estrellas',
+      progress: Math.min(stars, 25),
+      goal: 25,
+      reward: 30,
+      done: stars >= 25,
+    },
+    {
+      id: 'time60',
+      title: 'Superviviente',
+      detail: 'Sobrevive 60 segundos',
+      progress: Math.min(elapsed, 60),
+      goal: 60,
+      reward: 15,
+      done: elapsed >= 60,
+    },
+    {
+      id: 'level5',
+      title: 'Explorador',
+      detail: 'Alcanza el nivel 5',
+      progress: Math.min(level, 5),
+      goal: 5,
+      reward: 20,
+      done: level >= 5,
+    },
+  ];
+}
 const SHIPS = [
   { name: 'Comet', icon: '🚀', color: '#54e7ff', speed: 1 },
   { name: 'Phoenix', icon: '🛸', color: '#ff8a65', speed: 1.12 },
@@ -47,7 +89,7 @@ export default function App() {
   const [hud, setHud] = useState({ score: 0, stars: 0, lives: 3, level: 1, value: 2, time: 0 });
   const [result, setResult] = useState(null);
   const [fullScreen, setFullScreen] = useState(false);
-
+  const [missionPanel, setMissionPanel] = useState(false);
   const goFullscreen = useCallback(async () => {
     try {
       if (!document.fullscreenElement) {
@@ -84,6 +126,7 @@ export default function App() {
 
     function background(g) {
       const world = WORLDS[Math.floor((g.level - 1) / 50) % WORLDS.length];
+      const currentMissions = getMissions(hud.stars, hud.level, hud.time);
       const gradient = ctx.createLinearGradient(0, 0, W * 0.7, H);
       gradient.addColorStop(0, world.a);
       gradient.addColorStop(1, world.b);
@@ -367,6 +410,68 @@ export default function App() {
       </div>
 
       <div style={styles.frame}>
+        <div style={{
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 8,
+  padding: '8px 10px',
+  background: '#171a2c',
+  border: '1px solid #5b4b2a',
+  borderRadius: 9,
+  marginBottom: 6,
+  color: '#ffe6a2',
+  fontSize: 12,
+}}>
+  <strong>🪙 ODYSSEY: {hud.stars * REWARD_PER_STAR} unid.</strong>
+  <button
+    onClick={() => setMissionPanel(v => !v)}
+    style={{
+      padding: '7px 10px',
+      border: '1px solid #31516f',
+      borderRadius: 7,
+      background: '#101f35',
+      color: '#c6eaff',
+    }}
+  >
+    🎯 Misiones
+  </button>
+</div>
+
+{missionPanel && (
+  <div style={{
+    position: 'absolute',
+    zIndex: 5,
+    top: 8,
+    left: 8,
+    right: 8,
+    padding: 12,
+    border: '1px solid #31516f',
+    borderRadius: 10,
+    background: '#040c1c',
+    color: '#edf8ff',
+  }}>
+    <strong>MISIONES DE PILOTO</strong>
+    {currentMissions.map(m => (
+      <div key={m.id} style={{
+        padding: '10px 0',
+        borderBottom: '1px solid #243b56',
+        fontSize: 12,
+      }}>
+        <strong>{m.done ? '✅ ' : '🌌 '}{m.title}</strong>
+        <div style={{ color: '#a9bfd5', marginTop: 4 }}>
+          {m.detail}: {Math.floor(m.progress)}/{m.goal}
+        </div>
+        <small style={{ color: '#ffc45b' }}>
+          Recompensa de demostración: {m.reward} ODYSSEY
+        </small>
+      </div>
+    ))}
+    <small style={{ color: '#ffcf83' }}>
+      Recompensas provisionales; aún no tienen valor monetario.
+    </small>
+  </div>
+)}
         <canvas
           ref={canvasRef}
           width={W}
