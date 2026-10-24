@@ -1,115 +1,150 @@
 
-import React, { useEffect, useRef, useState } from 'react';
-import { Rocket, Star, Play, RotateCcw, Heart, Trophy } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Rocket, Star, Trophy, RotateCcw, Maximize2 } from 'lucide-react';
 
-const W = 360;
-const H = 640;
+const W = 390;
+const H = 844;
+const MAX_LEVEL = 501;
 
-const initialGame = () => ({
-  player: { x: W / 2, y: H - 100, w: 30, h: 42 },
-  objects: [],
-  particles: [],
-  keys: {},
-  score: 0,
-  stars: 0,
-  lives: 3,
-  frame: 0,
-  over: false,
-  nextId: 1,
-});
+const SHIPS = [
+  { name: 'Comet', icon: '🚀', color: '#54e7ff', speed: 1 },
+  { name: 'Phoenix', icon: '🛸', color: '#ff8a65', speed: 1.12 },
+  { name: 'Spectre', icon: '✦', color: '#c69aff', speed: 1.22 },
+  { name: 'Nova', icon: '🚀', color: '#ffe17b', speed: 1.08 },
+];
+
+const WORLDS = [
+  { name: 'Nebulosa Azul', a: '#06172f', b: '#102f60' },
+  { name: 'Marte Carmesí', a: '#260d22', b: '#772c35' },
+  { name: 'Anillos de Saturno', a: '#201934', b: '#65503e' },
+  { name: 'Abismo Violeta', a: '#170c36', b: '#4b2176' },
+  { name: 'Sector Esmeralda', a: '#061f27', b: '#126454' },
+  { name: 'Supernova', a: '#351017', b: '#a23a24' },
+  { name: 'Horizonte Dorado', a: '#211b25', b: '#84622e' },
+  { name: 'Galaxia Fantasma', a: '#0a1029', b: '#394d83' },
+  { name: 'Espacio Profundo', a: '#030712', b: '#25284c' },
+  { name: 'Última Frontera', a: '#190b25', b: '#6c286e' },
+];
+
+function newGame(ship = 0) {
+  return {
+    x: W / 2, y: H * 0.76,
+    objects: [], particles: [],
+    score: 0, stars: 0, lives: 3,
+    elapsed: 0, frame: 0, level: 1,
+    ship, over: false, invincible: 0,
+    nextId: 1,
+  };
+}
 
 export default function App() {
   const canvasRef = useRef(null);
-  const gameRef = useRef(initialGame());
-  const keysRef = useRef({});
+  const gameRef = useRef(newGame());
   const runningRef = useRef(false);
+  const pointerRef = useRef({ active: false, id: null });
   const [playing, setPlaying] = useState(false);
+  const [shipChoice, setShipChoice] = useState(0);
+  const [hud, setHud] = useState({ score: 0, stars: 0, lives: 3, level: 1, value: 2, time: 0 });
   const [result, setResult] = useState(null);
-  const [hud, setHud] = useState({ score: 0, stars: 0, lives: 3 });
-  const [soundless] = useState(true);
+  const [fullScreen, setFullScreen] = useState(false);
 
-  function startGame() {
-    gameRef.current = initialGame();
-    keysRef.current = {};
-    setHud({ score: 0, stars: 0, lives: 3 });
+  const goFullscreen = useCallback(async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen?.();
+      }
+      try {
+        await screen.orientation?.lock?.('portrait');
+      } catch {
+        // Algunos navegadores no permiten bloquear la orientación.
+      }
+      setFullScreen(Boolean(document.fullscreenElement));
+    } catch {
+      // El juego puede jugarse aunque fullscreen no esté disponible.
+    }
+  }, []);
+
+  const startGame = useCallback(async () => {
+    await goFullscreen();
+    gameRef.current = newGame(shipChoice);
+    pointerRef.current = { active: false, id: null };
+    setHud({ score: 0, stars: 0, lives: 3, level: 1, value: 2, time: 0 });
     setResult(null);
     runningRef.current = true;
     setPlaying(true);
-  }
+  }, [goFullscreen, shipChoice]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     let raf;
-    let lastHud = 0;
+    let last = performance.now();
+    let hudAt = 0;
 
-    function drawBackground() {
-      const gradient = ctx.createLinearGradient(0, 0, W, H);
-      gradient.addColorStop(0, '#07132d');
-      gradient.addColorStop(0.55, '#10143a');
-      gradient.addColorStop(1, '#210e38');
+    function background(g) {
+      const world = WORLDS[Math.floor((g.level - 1) / 50) % WORLDS.length];
+      const gradient = ctx.createLinearGradient(0, 0, W * 0.7, H);
+      gradient.addColorStop(0, world.a);
+      gradient.addColorStop(1, world.b);
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, W, H);
 
-      const g = gameRef.current;
-      for (let i = 0; i < 75; i++) {
-        const x = (i * 97 + 13) % W;
-        const y = (i * 157 + g.frame * (i % 3 + 1) * 0.6) % H;
+      // Nebulosas y estrellas de fondo
+      for (let i = 0; i < 95; i++) {
+        const x = (i * 113 + 17) % W;
+        const y = (i * 191 + g.frame * (0.3 + (i % 4) * 0.16)) % H;
         ctx.globalAlpha = 0.3 + (i % 5) * 0.13;
-        ctx.fillStyle = i % 8 === 0 ? '#54e7ff' : '#ffffff';
-        ctx.fillRect(x, y, i % 7 === 0 ? 2 : 1, i % 7 === 0 ? 2 : 1);
+        ctx.fillStyle = i % 9 === 0 ? '#54e7ff' : '#ffffff';
+        ctx.fillRect(x, y, i % 7 === 0 ? 2 : 1.3, i % 7 === 0 ? 2 : 1.3);
       }
       ctx.globalAlpha = 1;
 
-      ctx.fillStyle = 'rgba(91, 57, 175, 0.10)';
-      ctx.beginPath();
-      ctx.ellipse(180, 300, 150, 220, -0.4, 0, Math.PI * 2);
-      ctx.fill();
+      const glow = ctx.createRadialGradient(W * 0.5, H * 0.44, 5, W * 0.5, H * 0.44, W * 0.8);
+      glow.addColorStop(0, 'rgba(92,120,255,0.12)');
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, W, H);
     }
 
-    function drawShip(p) {
+    function drawShip(g) {
+      const ship = SHIPS[g.ship];
       ctx.save();
-      ctx.translate(p.x, p.y);
+      ctx.translate(g.x, g.y);
+      ctx.shadowColor = ship.color;
+      ctx.shadowBlur = 18;
 
-      // Motores luminosos
-      ctx.shadowBlur = 15;
-      ctx.shadowColor = '#39dfff';
-      ctx.fillStyle = '#45dfff';
+      ctx.fillStyle = ship.color;
       ctx.beginPath();
-      ctx.moveTo(-7, 14);
-      ctx.lineTo(0, 31 + Math.random() * 7);
-      ctx.lineTo(7, 14);
+      ctx.moveTo(-7, 13);
+      ctx.lineTo(0, 29 + Math.random() * 8);
+      ctx.lineTo(7, 13);
       ctx.closePath();
       ctx.fill();
 
-      // Alas
-      ctx.shadowBlur = 10;
-      ctx.fillStyle = '#3f9dff';
+      ctx.fillStyle = '#4d8fff';
       ctx.beginPath();
-      ctx.moveTo(0, -22);
-      ctx.lineTo(15, 16);
-      ctx.lineTo(5, 11);
+      ctx.moveTo(0, -24);
+      ctx.lineTo(18, 16);
+      ctx.lineTo(6, 10);
       ctx.lineTo(0, 16);
-      ctx.lineTo(-5, 11);
-      ctx.lineTo(-15, 16);
+      ctx.lineTo(-6, 10);
+      ctx.lineTo(-18, 16);
       ctx.closePath();
       ctx.fill();
 
-      // Cabina
-      ctx.shadowColor = '#ffffff';
-      ctx.fillStyle = '#e7fbff';
+      ctx.fillStyle = '#f2fcff';
       ctx.beginPath();
-      ctx.moveTo(0, -17);
-      ctx.lineTo(6, 8);
-      ctx.lineTo(0, 12);
-      ctx.lineTo(-6, 8);
+      ctx.moveTo(0, -19);
+      ctx.lineTo(7, 9);
+      ctx.lineTo(0, 13);
+      ctx.lineTo(-7, 9);
       ctx.closePath();
       ctx.fill();
 
-      ctx.fillStyle = '#43ddff';
+      ctx.fillStyle = ship.color;
       ctx.beginPath();
-      ctx.ellipse(0, 0, 3, 8, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, -1, 3.5, 8, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -118,54 +153,44 @@ export default function App() {
       ctx.save();
       ctx.translate(o.x, o.y);
       ctx.rotate(o.rotation);
-      ctx.shadowColor = '#ff653f';
-      ctx.shadowBlur = 8;
-      ctx.fillStyle = '#766779';
-      ctx.strokeStyle = '#ff9a66';
-      ctx.lineWidth = 1;
+      ctx.shadowColor = '#ff7047';
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = '#756a79';
+      ctx.strokeStyle = '#ff996b';
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      for (let i = 0; i < 9; i++) {
-        const a = (i / 9) * Math.PI * 2;
-        const r = o.r * (0.76 + 0.24 * Math.sin(i * 8.3));
+      for (let i = 0; i < 10; i++) {
+        const a = i * Math.PI / 5;
+        const r = o.r * (0.76 + 0.24 * Math.sin(i * 7.2));
         if (i === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
         else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
       }
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = '#ff8657';
-      ctx.fillRect(-o.r * 0.3, o.r * 0.15, o.r * 0.5, 2);
       ctx.restore();
     }
 
     function drawAlien(o) {
       ctx.save();
       ctx.translate(o.x, o.y);
-      ctx.shadowColor = '#6dff9b';
+      ctx.shadowColor = '#71ff9a';
       ctx.shadowBlur = 12;
-      ctx.fillStyle = '#40d57c';
+      ctx.fillStyle = '#40d67c';
       ctx.beginPath();
-      ctx.ellipse(0, 0, o.r, o.r * 0.72, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, o.r, o.r * 0.76, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#b8ffbd';
+      ctx.fillStyle = '#c0ffc6';
       ctx.beginPath();
       ctx.ellipse(0, -3, o.r * 0.6, o.r * 0.55, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = '#172443';
+      ctx.fillStyle = '#1b2543';
       ctx.beginPath();
-      ctx.arc(0, -3, o.r * 0.38, 0, Math.PI * 2);
+      ctx.arc(0, -3, o.r * 0.37, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#ff596e';
+      ctx.fillStyle = '#ff627b';
       ctx.beginPath();
-      ctx.arc(2, -4, o.r * 0.19, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#ff6079';
-      ctx.beginPath();
-      ctx.moveTo(-o.r * 0.45, o.r * 0.55);
-      ctx.lineTo(0, o.r * 1.25);
-      ctx.lineTo(o.r * 0.45, o.r * 0.55);
+      ctx.arc(2, -4, o.r * 0.18, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -175,14 +200,14 @@ export default function App() {
       ctx.translate(o.x, o.y);
       ctx.rotate(o.rotation);
       ctx.shadowColor = '#ffd45a';
-      ctx.shadowBlur = 17;
+      ctx.shadowBlur = 18;
       ctx.fillStyle = '#ffdc62';
       ctx.strokeStyle = '#fff3b0';
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       for (let i = 0; i < 10; i++) {
         const a = -Math.PI / 2 + i * Math.PI / 5;
-        const r = i % 2 === 0 ? o.r : o.r * 0.44;
+        const r = i % 2 === 0 ? o.r : o.r * 0.43;
         if (i === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
         else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
       }
@@ -193,80 +218,75 @@ export default function App() {
     }
 
     function draw() {
+      const now = performance.now();
+      const dt = Math.min((now - last) / 16.67, 2);
+      last = now;
       const g = gameRef.current;
-      drawBackground();
+      background(g);
 
       if (runningRef.current && !g.over) {
-        g.frame++;
-        const p = g.player;
-        const keys = keysRef.current;
-        const speed = 4.2;
+        g.frame += dt;
+        g.elapsed += (now - (g.lastTime || now)) / 1000;
+        g.lastTime = now;
 
-        if (keys.ArrowLeft || keys.a) p.x -= speed;
-        if (keys.ArrowRight || keys.d) p.x += speed;
-        if (keys.ArrowUp || keys.w) p.y -= speed;
-        if (keys.ArrowDown || keys.s) p.y += speed;
+        const difficulty = Math.floor(g.elapsed / 60);
+        g.level = Math.min(MAX_LEVEL, 1 + Math.floor(g.stars / 10) + difficulty);
+        const starValue = 2 + Math.floor(g.stars / 10);
 
-        p.x = Math.max(22, Math.min(W - 22, p.x));
-        p.y = Math.max(35, Math.min(H - 35, p.y));
+        const speed = (3.0 + difficulty * 0.38) * dt;
+        const spawnRate = Math.max(12, 48 - difficulty * 3);
 
-        const spawnRate = Math.max(23, 52 - Math.floor(g.score / 100));
-        if (g.frame % spawnRate === 0) {
+        if (g.frame % spawnRate < dt) {
           const roll = Math.random();
-          const type = roll < 0.53 ? 'meteor' : roll < 0.78 ? 'star' : 'alien';
-          const r = type === 'star' ? 10 : type === 'alien' ? 15 : 14 + Math.random() * 10;
+          const type = roll < 0.47 ? 'meteor' : roll < 0.74 ? 'star' : 'alien';
+          const r = type === 'star' ? 10 : type === 'alien' ? 15 : 13 + Math.random() * 11;
           g.objects.push({
-            id: g.nextId++,
-            type,
+            id: g.nextId++, type,
             x: r + Math.random() * (W - 2 * r),
-            y: -30,
-            r,
+            y: -30, r,
             rotation: Math.random() * 6,
-            speed: 1.8 + Math.random() * 1.6 + g.score / 1800,
+            speed: speed * (0.7 + Math.random() * 0.65),
           });
         }
 
+        const p = g;
         const kept = [];
         for (const o of g.objects) {
-          o.y += o.speed;
-          o.rotation += o.type === 'meteor' ? 0.025 : 0.01;
-
-          const dx = o.x - p.x;
-          const dy = o.y - p.y;
-          const hit = Math.hypot(dx, dy) < o.r + 14;
+          o.y += o.speed * dt;
+          o.rotation += 0.025 * dt;
+          const hit = Math.hypot(o.x - p.x, o.y - p.y) < o.r + 15;
 
           if (hit && o.type === 'star') {
             g.stars++;
-            g.score += 100;
-            for (let i = 0; i < 7; i++) {
+            g.score += starValue;
+            for (let i = 0; i < 9; i++) {
               g.particles.push({
                 x: o.x, y: o.y,
-                vx: (Math.random() - 0.5) * 4,
-                vy: (Math.random() - 0.5) * 4,
-                life: 22,
+                vx: (Math.random() - 0.5) * 5,
+                vy: (Math.random() - 0.5) * 5,
+                life: 25,
               });
             }
             continue;
           }
 
-          if (hit && (o.type === 'meteor' || o.type === 'alien')) {
+          if (hit && (o.type === 'meteor' || o.type === 'alien') && g.invincible <= 0) {
             g.lives--;
+            g.invincible = 90;
             if (g.lives <= 0) {
               g.lives = 0;
               g.over = true;
               runningRef.current = false;
-              setResult({ score: g.score, stars: g.stars });
-            } else {
-              p.x = W / 2;
-              p.y = H - 100;
+              setResult({ score: g.score, stars: g.stars, level: g.level });
             }
             continue;
           }
 
           if (o.y < H + 40) kept.push(o);
-          else if (o.type !== 'star') g.score += 1;
+          else if (o.type !== 'star') g.score++;
         }
         g.objects = kept;
+        g.invincible = Math.max(0, g.invincible - dt);
       }
 
       for (const o of g.objects) {
@@ -275,179 +295,214 @@ export default function App() {
         else drawStar(o);
       }
 
-      const p = g.player;
-      if (!g.over) drawShip(p);
-
       g.particles = g.particles.filter((part) => part.life > 0);
       for (const part of g.particles) {
-        part.x += part.vx;
-        part.y += part.vy;
-        part.life--;
-        ctx.globalAlpha = Math.max(0, part.life / 22);
+        part.x += part.vx * dt;
+        part.y += part.vy * dt;
+        part.life -= dt;
+        ctx.globalAlpha = Math.max(0, part.life / 25);
         ctx.fillStyle = '#ffdf68';
         ctx.fillRect(part.x, part.y, 3, 3);
       }
       ctx.globalAlpha = 1;
 
-      if (g.frame - lastHud > 8) {
-        setHud({ score: g.score, stars: g.stars, lives: g.lives });
-        lastHud = g.frame;
+      if (g.invincible <= 0 || Math.floor(g.frame / 5) % 2 === 0) {
+        drawShip(g);
       }
 
+      if (now - hudAt > 120) {
+        setHud({
+          score: g.score, stars: g.stars, lives: g.lives,
+          level: g.level, value: 2 + Math.floor(g.stars / 10),
+          time: Math.floor(g.elapsed),
+        });
+        hudAt = now;
+      }
       raf = requestAnimationFrame(draw);
     }
 
-    draw();
+    raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  useEffect(() => {
-    function onDown(e) {
-      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(key)) {
-        e.preventDefault();
-      }
-      keysRef.current[key] = true;
-    }
-    function onUp(e) {
-      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-      keysRef.current[key] = false;
-    }
-    window.addEventListener('keydown', onDown);
-    window.addEventListener('keyup', onUp);
-    return () => {
-      window.removeEventListener('keydown', onDown);
-      window.removeEventListener('keyup', onUp);
-    };
-  }, []);
+  function moveShip(e) {
+    if (!playing || !pointerRef.current.active) return;
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const g = gameRef.current;
+    g.x = Math.max(22, Math.min(W - 22, ((e.clientX - rect.left) / rect.width) * W));
+    g.y = Math.max(35, Math.min(H - 35, ((e.clientY - rect.top) / rect.height) * H));
+  }
 
-  function press(key) {
-    keysRef.current[key] = true;
+  function pointerDown(e) {
+    if (!playing || result) return;
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const g = gameRef.current;
+    const x = ((e.clientX - rect.left) / rect.width) * W;
+    const y = ((e.clientY - rect.top) / rect.height) * H;
+    // Para iniciar el control, toca la nave o cerca de ella.
+    if (Math.hypot(x - g.x, y - g.y) < 85) {
+      pointerRef.current = { active: true, id: e.pointerId };
+      canvas.setPointerCapture?.(e.pointerId);
+      moveShip(e);
+    }
   }
-  function release(key) {
-    keysRef.current[key] = false;
+
+  function pointerUp(e) {
+    if (pointerRef.current.id === e.pointerId) {
+      pointerRef.current = { active: false, id: null };
+    }
   }
+
+  const world = WORLDS[Math.floor((hud.level - 1) / 50) % WORLDS.length];
 
   return (
     <main style={styles.page}>
-      <div style={styles.header}>
-        <div style={styles.logo}><Rocket size={22} /> SPACE ODYSSEY</div>
-        <div style={styles.live}><span style={styles.dot} /> EN VIVO</div>
-      </div>
-
       <div style={styles.hud}>
-        <div style={styles.hudCard}>
-          <span style={styles.label}>PUNTUACIÓN</span>
-          <strong style={styles.number}>{String(hud.score).padStart(6, '0')}</strong>
-        </div>
-        <div style={styles.hudCard}>
-          <span style={styles.label}><Star size={13} /> ESTRELLAS</span>
-          <strong style={styles.number}>{hud.stars}</strong>
-        </div>
-        <div style={styles.hudCard}>
-          <span style={styles.label}>VIDAS</span>
-          <strong style={styles.lives}>{'♥ '.repeat(hud.lives) || '—'}</strong>
-        </div>
+        <div><small>PUNTOS</small><strong>{hud.score}</strong></div>
+        <div><small><Star size={12} /> ESTRELLAS</small><strong>{hud.stars}</strong></div>
+        <div><small>NIVEL</small><strong>{hud.level}/{MAX_LEVEL}</strong></div>
+        <div><small>VIDAS</small><strong style={{ color: '#ff7185' }}>{'♥'.repeat(hud.lives) || '—'}</strong></div>
       </div>
 
-      <div style={styles.gameFrame}>
+      <div style={styles.frame}>
         <canvas
           ref={canvasRef}
           width={W}
           height={H}
           style={styles.canvas}
-          aria-label="Juego espacial. Usa las flechas o WASD para mover la nave."
+          onPointerDown={pointerDown}
+          onPointerMove={moveShip}
+          onPointerUp={pointerUp}
+          onPointerCancel={pointerUp}
+          onLostPointerCapture={pointerUp}
+          aria-label="Arrastra el dedo sobre la nave para moverla por el espacio."
         />
 
         {!playing && !result && (
           <div style={styles.overlay}>
-            <div style={styles.bigIcon}>🚀</div>
-            <div style={styles.kicker}>MISIÓN DE SUPERVIVENCIA</div>
-            <h1 style={styles.title}>SPACE<br /><span style={{ color: '#54e7ff' }}>ODYSSEY</span></h1>
-            <p style={styles.copy}>Esquiva meteoritos, evita a los marcianos y recoge estrellas para lograr la mejor puntuación.</p>
-            <button style={styles.start} onClick={startGame}><Play size={18} fill="currentColor" /> INICIAR PARTIDA</button>
-            <small style={styles.hint}>TECLADO O CONTROLES TÁCTILES</small>
+            <Rocket size={48} color="#54e7ff" />
+            <small style={styles.eyebrow}>ARCADE ESPACIAL</small>
+            <h1>SPACE<br /><span style={{ color: '#54e7ff' }}>ODYSSEY</span></h1>
+            <p>Arrastra la nave con el dedo para esquivar obstáculos y recoger estrellas.</p>
+
+            <div style={styles.shipChoices}>
+              {SHIPS.map((ship, i) => (
+                <button
+                  key={ship.name}
+                  onClick={() => setShipChoice(i)}
+                  style={{
+                    ...styles.shipButton,
+                    borderColor: shipChoice === i ? ship.color : '#29415e',
+                    background: shipChoice === i ? '#18314c' : '#091326',
+                  }}
+                >
+                  <span style={{ color: ship.color, fontSize: 22 }}>{ship.icon}</span>
+                  <small>{ship.name}</small>
+                </button>
+              ))}
+            </div>
+
+            <button style={styles.start} onClick={startGame}>
+              <Rocket size={18} /> INICIAR PARTIDA
+            </button>
+            <button style={styles.fullscreen} onClick={goFullscreen}>
+              <Maximize2 size={15} /> PANTALLA COMPLETA
+            </button>
+            <small style={styles.note}>501 NIVELES · 10 MUNDOS · DIFICULTAD PROGRESIVA</small>
           </div>
         )}
 
         {result && (
           <div style={styles.overlay}>
-            <div style={styles.bigIcon}>💥</div>
-            <div style={styles.kicker}>SEÑAL PERDIDA</div>
-            <h2 style={styles.title}>FIN DE LA<br /><span style={{ color: '#ff7c8e' }}>PARTIDA</span></h2>
+            <div style={{ fontSize: 48 }}>💥</div>
+            <small style={styles.eyebrow}>FIN DE LA PARTIDA</small>
+            <h2>¡VUELVE A INTENTARLO!</h2>
             <div style={styles.resultBox}>
-              <div><span style={styles.label}>PUNTUACIÓN</span><strong style={styles.number}>{result.score}</strong></div>
-              <div><span style={styles.label}>ESTRELLAS</span><strong style={styles.number}>{result.stars}</strong></div>
+              <div><small>PUNTOS</small><strong>{result.score}</strong></div>
+              <div><small>ESTRELLAS</small><strong>{result.stars}</strong></div>
+              <div><small>NIVEL</small><strong>{result.level}</strong></div>
             </div>
-            <button style={styles.start} onClick={startGame}><RotateCcw size={18} /> VOLVER A JUGAR</button>
+            <button style={styles.start} onClick={startGame}>
+              <RotateCcw size={18} /> VOLVER A JUGAR
+            </button>
+            <button style={styles.fullscreen} onClick={() => {
+              runningRef.current = false;
+              setPlaying(false);
+              setResult(null);
+            }}>VOLVER AL MENÚ</button>
           </div>
         )}
       </div>
 
-      <div style={styles.mission}>
-        <div style={styles.missionTitle}><Trophy size={17} color="#ffc45b" /> OBJETIVO DE VUELO</div>
-        <p style={styles.missionCopy}>Recoge estrellas para sumar 100 puntos. ¡Evita los meteoritos y marcianos!</p>
-        <div style={styles.missionStats}>
-          <span><Star size={15} color="#ffc45b" /> {hud.stars} estrellas</span>
-          <span><Heart size={15} color="#ff7185" /> {hud.lives} vidas restantes</span>
-        </div>
+      <div style={styles.info}>
+        <div><Star size={15} color="#ffc45b" /> <span>{hud.value} puntos por estrella</span></div>
+        <div><Trophy size={15} color="#54e7ff" /> <span>{world.name}</span></div>
+        <div><span>⏱</span> <span>Dificultad: +1 cada minuto</span></div>
       </div>
 
-      <div style={styles.controls}>
-        <div style={styles.controlsText}>CONTROLES DE NAVE <small>WASD / FLECHAS</small></div>
-        <div style={styles.pad}>
-          <span />
-          <button aria-label="Arriba" style={styles.padButton} onPointerDown={() => press('ArrowUp')} onPointerUp={() => release('ArrowUp')} onPointerLeave={() => release('ArrowUp')} onPointerCancel={() => release('ArrowUp')}>▲</button>
-          <span />
-          <button aria-label="Izquierda" style={styles.padButton} onPointerDown={() => press('ArrowLeft')} onPointerUp={() => release('ArrowLeft')} onPointerLeave={() => release('ArrowLeft')} onPointerCancel={() => release('ArrowLeft')}>◀</button>
-          <button aria-label="Abajo" style={styles.padButton} onPointerDown={() => press('ArrowDown')} onPointerUp={() => release('ArrowDown')} onPointerLeave={() => release('ArrowDown')} onPointerCancel={() => release('ArrowDown')}>▼</button>
-          <button aria-label="Derecha" style={styles.padButton} onPointerDown={() => press('ArrowRight')} onPointerUp={() => release('ArrowRight')} onPointerLeave={() => release('ArrowRight')} onPointerCancel={() => release('ArrowRight')}>▶</button>
-        </div>
-      </div>
-
-      <footer style={styles.footer}>SPACE ODYSSEY <span>·</span> EXPLORACIÓN GALÁCTICA</footer>
+      {playing && (
+        <div style={styles.touchHint}>☝️ TOCA LA NAVE Y ARRASTRA EL DEDO PARA MOVERLA</div>
+      )}
     </main>
   );
 }
 
 const styles = {
   page: {
-    minHeight: '100vh', width: '100%', maxWidth: 520, margin: '0 auto',
-    padding: '14px 12px 22px', color: '#edf8ff', background: '#050914',
-    fontFamily: 'Inter, system-ui, sans-serif', boxSizing: 'border-box',
+    position: 'fixed', inset: 0, width: '100%', height: '100dvh',
+    overflow: 'hidden', background: '#030712', color: '#edf8ff',
+    fontFamily: 'Inter, system-ui, sans-serif', display: 'flex',
+    flexDirection: 'column', padding: 'max(env(safe-area-inset-top), 6px) 8px max(env(safe-area-inset-bottom), 6px)',
+    boxSizing: 'border-box', zIndex: 9999, touchAction: 'none',
   },
-  header: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '6px 2px 14px', borderBottom: '1px solid #18314a',
+  hud: {
+    display: 'grid', gridTemplateColumns: '1fr 0.8fr 0.8fr 0.7fr',
+    gap: 5, flex: '0 0 auto', paddingBottom: 6,
   },
-  logo: {
-    display: 'flex', alignItems: 'center', gap: 8, color: '#54e7ff',
-    fontWeight: 900, fontSize: 14, letterSpacing: 1.2,
+  frame: {
+    position: 'relative', flex: '1 1 auto', minHeight: 0, width: '100%',
+    overflow: 'hidden', border: '1px solid #244b70', borderRadius: 9,
+    background: '#06152b', boxShadow: '0 0 24px #14396555',
   },
-  live: { color: '#81a3bd', fontSize: 10, letterSpacing: 1.5, display: 'flex', gap: 7, alignItems: 'center' },
-  dot: { width: 7, height: 7, borderRadius: '50%', background: '#5dffb0', boxShadow: '0 0 10px #5dffb0' },
-  hud: { display: 'grid', gridTemplateColumns: '1fr 0.7fr 0.7fr', gap: 7, padding: '12px 0' },
-  hudCard: { background: '#0b1729', border: '1px solid #203c58', borderRadius: 10, padding: '9px 10px', minWidth: 0 },
-  label: { display: 'flex', alignItems: 'center', gap: 4, color: '#8ba7c3', fontSize: 9, letterSpacing: 1, fontWeight: 800 },
-  number: { display: 'block', color: '#54e7ff', fontSize: 21, fontWeight: 900, marginTop: 3, fontVariantNumeric: 'tabular-nums' },
-  lives: { display: 'block', color: '#ff7185', fontSize: 16, marginTop: 5, whiteSpace: 'nowrap' },
-  gameFrame: { position: 'relative', width: '100%', aspectRatio: '9 / 16', maxHeight: '64vh', margin: '0 auto', border: '1px solid #245273', borderRadius: 13, overflow: 'hidden', boxShadow: '0 0 28px #10294c66', background: '#07132d' },
-  canvas: { display: 'block', width: '100%', height: '100%', objectFit: 'contain', touchAction: 'none' },
-  overlay: { position: 'absolute', inset: 0, padding: '22px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', background: 'linear-gradient(180deg, #040b1cdd, #08112beF)', backdropFilter: 'blur(3px)' },
-  bigIcon: { fontSize: 48, filter: 'drop-shadow(0 0 16px #54e7ff)' },
-  kicker: { color: '#ffc45b', fontSize: 10, fontWeight: 800, letterSpacing: 2, marginTop: 14 },
-  title: { margin: '12px 0', fontSize: 'clamp(29px, 8vw, 43px)', lineHeight: 1.05, fontWeight: 950, letterSpacing: -1.5 },
-  copy: { maxWidth: 290, color: '#a9bed5', fontSize: 13, lineHeight: 1.7, margin: '6px 0 20px' },
-  start: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, width: '100%', maxWidth: 260, padding: '15px 12px', border: 0, borderRadius: 10, background: 'linear-gradient(110deg,#54e7ff,#a5f5ff)', color: '#03101a', fontWeight: 900, fontSize: 12, letterSpacing: 1, cursor: 'pointer' },
-  hint: { marginTop: 14, color: '#718aa6', fontSize: 9, letterSpacing: 1.5 },
-  mission: { marginTop: 12, padding: 14, background: '#0b1729', border: '1px solid #203c58', borderRadius: 12 },
-  missionTitle: { display: 'flex', alignItems: 'center', gap: 8, color: '#edf8ff', fontSize: 11, fontWeight: 900, letterSpacing: 1 },
-  missionCopy: { color: '#91a6c2', fontSize: 12, lineHeight: 1.6, margin: '9px 0' },
-  missionStats: { display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', color: '#bed1e6', fontSize: 11 },
-  controls: { marginTop: 12, padding: 13, background: '#0b1729', border: '1px solid #203c58', borderRadius: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
-  controlsText: { color: '#edf8ff', fontSize: 10, fontWeight: 900, letterSpacing: 1, lineHeight: 1.8 },
-  pad: { display: 'grid', gridTemplateColumns: 'repeat(3, 42px)', gridTemplateRows: 'repeat(2, 42px)', gap: 4, touchAction: 'none' },
-  padButton: { border: '1px solid #3279a4', borderRadius: 8, background: '#102a43', color: '#70e9ff', fontSize: 15, fontWeight: 900, touchAction: 'none', userSelect: 'none' },
-  footer: { padding: '18px 0 4px', textAlign: 'center', color: '#607c9b', fontSize: 9, letterSpacing: 1.3 },
-  resultBox: { display: 'flex', justifyContent: 'center', gap: 28, padding: '12px 20px 22px' },
+  canvas: {
+    display: 'block', width: '100%', height: '100%',
+    touchAction: 'none', userSelect: 'none',
+  },
+  hudCard: {},
+  overlay: {
+    position: 'absolute', inset: 0, overflowY: 'auto',
+    padding: '20px 18px', display: 'flex', flexDirection: 'column',
+    alignItems: 'center', justifyContent: 'center', textAlign: 'center',
+    background: 'linear-gradient(180deg,#040b1cf2,#09132bf5)',
+    backdropFilter: 'blur(5px)', gap: 12,
+  },
+  eyebrow: { color: '#ffc45b', letterSpacing: 2, fontWeight: 900, fontSize: 10 },
+  start: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+    width: '100%', maxWidth: 270, padding: 15, border: 0, borderRadius: 10,
+    background: 'linear-gradient(110deg,#54e7ff,#a5f5ff)',
+    color: '#041019', fontWeight: 900, letterSpacing: 1, cursor: 'pointer',
+  },
+  fullscreen: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+    padding: 10, background: '#101f35', border: '1px solid #31516f',
+    color: '#c6eaff', borderRadius: 9, fontSize: 10, fontWeight: 800,
+  },
+  shipChoices: { display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 6, width: '100%', maxWidth: 300 },
+  shipButton: {
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+    padding: '9px 2px', border: '1px solid', borderRadius: 9, color: '#edf8ff',
+  },
+  note: { color: '#8ca4c0', fontSize: 9, letterSpacing: 1, lineHeight: 1.7 },
+  resultBox: { display: 'flex', justifyContent: 'center', gap: 22, padding: 12 },
+  info: {
+    display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between',
+    gap: 6, padding: '9px 2px 3px', color: '#a9bfd5', fontSize: 10,
+  },
+  touchHint: {
+    textAlign: 'center', color: '#54e7ff', fontSize: 9, letterSpacing: 1,
+    padding: '4px 0 2px', flex: '0 0 auto',
+  },
 };
